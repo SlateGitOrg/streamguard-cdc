@@ -1,0 +1,25 @@
+{
+  "name": "streamguard-postgres-connector",
+  "config": {
+    "connector.class": "io.debezium.connector.postgresql.PostgresConnector",
+    "plugin.name": "pgoutput",
+    "database.hostname": "postgres",
+    "database.port": "5432",
+    "database.user": "streamguard",
+    "database.password": "streamguard",
+    "database.dbname": "streamguard",
+    "topic.prefix": "streamguard",
+    "publication.name": "streamguard_publication",
+    "slot.name": "streamguard_slot",
+    "table.include.list": "public.orders,public.customers",
+    "tombstones.on.delete": "false",
+    "decimal.handling.mode": "double",
+    "heartbeat.interval.ms": "5000",
+    "snapshot.mode": "initial",
+    "key.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "value.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "key.converter.schemas.enable": "false",
+    "value.converter.schemas.enable": "true",
+    "producer.override.max.request.size": "5242880"
+  }
+}

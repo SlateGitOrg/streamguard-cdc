@@ -1,0 +1,93 @@
+{
+  "title": "StreamGuard CDC - Lag & Throughput",
+  "uid": "streamguard-lag-throughput",
+  "schemaVersion": 39,
+  "version": 1,
+  "timezone": "browser",
+  "refresh": "5s",
+  "time": { "from": "now-15m", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Consumer Lag (events behind high watermark)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [
+        {
+          "expr": "streamguard_consumer_lag",
+          "legendFormat": "lag",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "short", "color": { "mode": "palette-classic" } }
+      }
+    },
+    {
+      "id": 2,
+      "title": "Throughput (events/sec)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [
+        {
+          "expr": "rate(streamguard_consumed_total[1m])",
+          "legendFormat": "consumed/sec",
+          "refId": "A"
+        },
+        {
+          "expr": "rate(streamguard_sink_writes_total[1m])",
+          "legendFormat": "sink writes/sec",
+          "refId": "B"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Dead-lettered events (total)",
+      "type": "stat",
+      "gridPos": { "h": 8, "w": 6, "x": 0, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [{ "expr": "streamguard_dlq_total", "refId": "A" }]
+    },
+    {
+      "id": 4,
+      "title": "Duplicate (redelivered) events dropped",
+      "type": "stat",
+      "gridPos": { "h": 8, "w": 6, "x": 6, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [{ "expr": "streamguard_duplicates_total", "refId": "A" }]
+    },
+    {
+      "id": 5,
+      "title": "Schema evolution events detected",
+      "type": "stat",
+      "gridPos": { "h": 8, "w": 6, "x": 12, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [{ "expr": "streamguard_schema_changes_total", "refId": "A" }]
+    },
+    {
+      "id": 6,
+      "title": "Windows emitted to ClickHouse",
+      "type": "stat",
+      "gridPos": { "h": 8, "w": 6, "x": 18, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [{ "expr": "streamguard_windows_emitted_total", "refId": "A" }]
+    },
+    {
+      "id": 7,
+      "title": "Live revenue per store (last 30 min, ClickHouse)",
+      "type": "timeseries",
+      "gridPos": { "h": 9, "w": 24, "x": 0, "y": 16 },
+      "datasource": { "type": "grafana-clickhouse-datasource", "uid": "ClickHouse" },
+      "targets": [
+        {
+          "rawSql": "SELECT toDateTime(window_start_ms / 1000) AS time, group_key AS store_id, sum AS revenue FROM streamguard.orders_revenue_by_minute ORDER BY window_start_ms",
+          "format": "time_series",
+          "refId": "A"
+        }
+      ]
+    }
+  ]
+}

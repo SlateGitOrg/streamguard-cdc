@@ -1,0 +1,123 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: streamguard-postgres
+    environment:
+      POSTGRES_USER: streamguard
+      POSTGRES_PASSWORD: streamguard
+      POSTGRES_DB: streamguard
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./infra/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - ./infra/postgres/postgres.conf:/etc/postgresql/postgresql.conf:ro
+      - pgdata:/var/lib/postgresql/data
+    command: ["postgres", "-c", "config_file=/etc/postgresql/postgresql.conf"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U streamguard"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redpanda:
+    image: redpandadata/redpanda:v24.2.7
+    container_name: streamguard-redpanda
+    command:
+      - redpanda
+      - start
+      - --smp=1
+      - --overprovisioned
+      - --node-id=0
+      - --kafka-addr=PLAINTEXT://0.0.0.0:9092,OUTSIDE://0.0.0.0:19092
+      - --advertise-kafka-addr=PLAINTEXT://redpanda:9092,OUTSIDE://localhost:19092
+      - --pandaproxy-addr=0.0.0.0:8082
+      - --advertise-pandaproxy-addr=redpanda:8082
+    ports:
+      - "19092:19092"
+      - "8082:8082"
+    healthcheck:
+      test: ["CMD-SHELL", "rpk cluster health | grep -q 'Healthy:.*true'"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  connect:
+    image: debezium/connect:2.7
+    container_name: streamguard-connect
+    depends_on:
+      redpanda:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    environment:
+      BOOTSTRAP_SERVERS: redpanda:9092
+      GROUP_ID: streamguard-connect
+      CONFIG_STORAGE_TOPIC: streamguard_connect_configs
+      OFFSET_STORAGE_TOPIC: streamguard_connect_offsets
+      STATUS_STORAGE_TOPIC: streamguard_connect_status
+    ports:
+      - "8083:8083"
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.8
+    container_name: streamguard-clickhouse
+    ports:
+      - "8123:8123"
+      - "9000:9000"
+    volumes:
+      - ./infra/clickhouse/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - clickhouse-data:/var/lib/clickhouse
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8123/ping || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  streamguard-processor:
+    build: .
+    container_name: streamguard-processor
+    depends_on:
+      redpanda:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: redpanda:9092
+      CLICKHOUSE_URL: http://clickhouse:8123
+      CLICKHOUSE_DATABASE: streamguard
+      DLQ_TOPIC: streamguard.dlq
+      CONSUMER_GROUP_ID: streamguard-processor
+      WINDOW_SIZE_MS: "60000"
+      ALLOWED_LATENESS_MS: "10000"
+      METRICS_PORT: "9464"
+    ports:
+      - "9464:9464"
+
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    container_name: streamguard-prometheus
+    volumes:
+      - ./infra/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+    depends_on:
+      - streamguard-processor
+
+  grafana:
+    image: grafana/grafana:11.2.0
+    container_name: streamguard-grafana
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_INSTALL_PLUGINS: grafana-clickhouse-datasource
+    volumes:
+      - ./infra/grafana/provisioning:/etc/grafana/provisioning:ro
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+      - clickhouse
+
+volumes:
+  pgdata:
+  clickhouse-data:

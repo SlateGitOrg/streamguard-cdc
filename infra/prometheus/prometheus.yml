@@ -1,0 +1,7 @@
+global:
+  scrape_interval: 5s
+
+scrape_configs:
+  - job_name: streamguard-processor
+    static_configs:
+      - targets: ["streamguard-processor:9464"]
