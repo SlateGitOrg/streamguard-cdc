@@ -1,10 +1,12 @@
 # streamguard-cdc
 
-**A production-shaped change-data-capture pipeline: Postgres stays the source of truth, everything downstream stays in sync in seconds, not hours.**
+**Change-data-capture pipeline: Postgres WAL → Debezium → Kafka-compatible broker → a Python stream processor (dedupe, schema evolution, windowed aggregation) → ClickHouse.**
+
+[![CI](https://github.com/SlateGitOrg/streamguard-cdc/actions/workflows/ci.yml/badge.svg)](https://github.com/SlateGitOrg/streamguard-cdc/actions/workflows/ci.yml)
 
 ![streamguard-cdc](assets/hero.png)
 
-## The real problem
+## Why
 
 Every mid-to-large SaaS eventually needs its search index, its cache, its
 analytics warehouse, or a downstream microservice to reflect what just
@@ -25,6 +27,17 @@ end to end: a real Postgres logical-replication source, a real Debezium
 connector, a real Kafka-compatible broker, a stream processor with the
 three things that make CDC pipelines hard in practice (deduplication,
 schema evolution, windowed aggregation), and a real analytical sink.
+
+## Features
+
+- Real logical-replication source: Postgres with `REPLICA IDENTITY FULL` and a publication, read by a Debezium connector.
+- Debezium envelope parsing with dead-lettering of malformed or failing records (`streamguard.dlq`).
+- Idempotent processing: bounded TTL seen-set keyed on `(table, primary key, WAL LSN)`.
+- Schema evolution: new or missing columns are reconciled instead of crashing or dropping data.
+- Tumbling-window aggregation (revenue per store per minute) with a watermark and a lateness grace period.
+- ClickHouse sink with highest-LSN-wins upserts, tombstoned deletes and a separate aggregates table.
+- Prometheus metrics and a provisioned Grafana lag/throughput dashboard.
+- Everything unit-testable offline through in-memory Kafka and ClickHouse fakes.
 
 ## Architecture
 
@@ -73,7 +86,25 @@ python3 scripts/run_offline_demo.py   # end-to-end demo: 500 synthetic
                                        # windowing -> in-memory ClickHouse
 ```
 
+Requires Python 3.10+. The offline demo prints (trimmed):
+
+```text
+Generating 500 synthetic orders (deterministic, seed=2024) ...
+Published 532 raw Kafka records. Processing ...
+
+=== Pipeline results ===
+   dead_lettered: 12
+       duplicate: 31
+       processed: 489
+...
+Live (non-deleted) rows in ClickHouse 'orders' mirror: 488
+Aggregation windows emitted (incl. final flush): 73
+Dead-lettered records on 'streamguard.dlq': 12
+```
+
 ### Run the real stack
+
+Requires Docker with Compose v2. The stack runs Postgres, Redpanda, Debezium Connect, ClickHouse, Prometheus and Grafana.
 
 ```bash
 docker compose up -d
@@ -181,8 +212,7 @@ RUN_INTEGRATION_TESTS=1 pytest tests/integration/ -v
 ```
 
 `docs/FAILURE_INJECTION.md` documents (and `tests/test_failure_injection.py`
-verifies, offline) the "kill Kafka mid-stream, verify no data loss" test
-this project's scope calls for.
+verifies, offline) the "kill Kafka mid-stream, verify no data loss" scenario.
 
 ## Project layout
 
@@ -199,6 +229,12 @@ scripts/                connector registration, offline demo
 docs/FAILURE_INJECTION.md   documented broker-outage / no-data-loss test
 docker-compose.yml      the full stack: Postgres, Redpanda, Debezium Connect, ClickHouse, Prometheus, Grafana
 ```
+
+## Limitations
+
+- The processor is a single Python consumer loop, not a horizontally scaled stream engine; the dedup seen-set is in memory and bounded, so replays older than its TTL are not detected.
+- Only the `orders` and `customers` tables and the revenue-per-store aggregate are modelled.
+- The Docker-backed integration test is opt-in and not run in CI.
 
 ## License
 
